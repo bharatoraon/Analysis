@@ -1,6 +1,10 @@
 // Step 1: DEFINE YOUR AREA OF INTEREST (AOI)
 // Replace the path below with the path to YOUR shapefile asset.
 var hyderabadRegion = ee.FeatureCollection('projects/your-project/assets/Your-AOI-Shapefile');
+// Or Define your area of interest (AOI) in Rectangle.
+// You can use the geometry drawing tools in the GEE Code Editor
+// or define it programmatically. For this example, let's use a rectangle.
+var aoi = ee.Geometry.Rectangle([[-123.5, 36.5], [-120.0, 38.5]]); // Example: California coast
 
 // Center the map on your region and add it as a layer
 Map.centerObject(hyderabadRegion, 11);
