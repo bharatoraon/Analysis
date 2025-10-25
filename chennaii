@@ -1,0 +1,120 @@
+// Define the Area of Interest (AOI)
+var minLon = 79.9;
+var maxLon = 80.4;
+var minLat = 12.85;
+var maxLat = 13.5;
+
+var aoi = ee.Geometry.Rectangle([minLon, minLat, maxLon, maxLat]);
+
+// Center the map on your AOI and add it as a layer
+Map.centerObject(aoi, 10); // Zoomed out slightly for better context
+Map.addLayer(aoi, {color: 'blue', 'fillColor': 'rgba(0, 0, 255, 0.1)'}, "My AOI Boundary");
+
+// Function to apply scaling factors for Landsat Collection 2
+function applyScaleFactors(image) {
+  var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+  return image.addBands(opticalBands, null, true);
+}
+
+// Function to load and merge Landsat 8 and 9 collections for optical bands
+function loadLandsat(region, start, end) {
+  var collection9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2')
+                      .filterDate(start, end)
+                      .filterBounds(region);
+  var collection8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+                      .filterDate(start, end)
+                      .filterBounds(region);
+  return collection9.merge(collection8)
+                    .select(['SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'QA_PIXEL']); // Green, Red, NIR, SWIR1, Pixel Quality
+}
+
+// Function to mask clouds from a Landsat image
+function maskClouds(image) {
+  var qa = image.select('QA_PIXEL');
+  // Bits 3 and 4 are cloud and cloud shadow, respectively.
+  var cloudShadowBitMask = (1 << 4);
+  var cloudBitMask = (1 << 3);
+  var cloudMask = qa.bitwiseAnd(cloudBitMask).or(qa.bitwiseAnd(cloudShadowBitMask));
+  return image.updateMask(cloudMask.not());
+}
+
+// Function to calculate NDVI
+function calculateNDVI(image) {
+  return image.addBands(image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI'));
+}
+
+// Function to calculate NDBI
+function calculateNDBI(image) {
+  return image.addBands(image.normalizedDifference(['SR_B6', 'SR_B5']).rename('NDBI'));
+}
+
+// Function to calculate NDWI
+function calculateNDWI(image) {
+  return image.addBands(image.normalizedDifference(['SR_B3', 'SR_B5']).rename('NDWI'));
+}
+
+// --- CUSTOMIZE YOUR ANALYSIS PARAMETERS ---
+var years = [2014, 2019, 2024]; // The years you want to analyze
+var startDate = '-01-01'; // January 1st
+var endDate = '-12-31';   // December 31st
+
+// Iterate over each year to calculate and export indices
+years.forEach(function(year) {
+  var start = year + startDate;
+  var end = year + endDate;
+  print('Processing year: ' + year);
+
+  // Define the processing chain
+  var collection = loadLandsat(aoi, start, end)
+                      .map(applyScaleFactors) // Apply scale factors first
+                      .map(maskClouds)
+                      .map(calculateNDVI)
+                      .map(calculateNDBI)
+                      .map(calculateNDWI);
+
+  // Create a single median-pixel composite for the year
+  var medianImage = collection.median().clip(aoi);
+  
+  // Select the individual index bands for visualization and export
+  var ndvi_median = medianImage.select('NDVI');
+  var ndbi_median = medianImage.select('NDBI');
+  var ndwi_median = medianImage.select('NDWI');
+
+  // Visualization parameters
+  var ndviVisParams = {min: -1, max: 1, palette: ['blue', 'white', 'green']}; // Water, bare, vegetation
+  var ndbiVisParams = {min: -1, max: 1, palette: ['green', 'white', 'red']};   // Vegetation, bare, built-up
+  var ndwiVisParams = {min: -1, max: 1, palette: ['brown', 'white', 'blue']};  // Dry, soil, water
+
+  // Add layers to the map
+  Map.addLayer(ndvi_median, ndviVisParams, 'NDVI_' + year);
+  Map.addLayer(ndbi_median, ndbiVisParams, 'NDBI_' + year);
+  Map.addLayer(ndwi_median, ndwiVisParams, 'NDWI_' + year);
+  
+  // --- Exporting the Results ---
+  Export.image.toDrive({
+    image: ndvi_median,
+    description: 'NDVI_Median_' + year + '_Chennai',
+    folder: 'GEE_NDVI_Exports',
+    scale: 30,
+    region: aoi,
+    maxPixels: 1e9
+  });
+
+  Export.image.toDrive({
+    image: ndbi_median,
+    description: 'NDBI_Median_' + year + '_Chennai',
+    folder: 'GEE_NDBI_Exports',
+    scale: 30,
+    region: aoi,
+    maxPixels: 1e9
+  });
+  
+  Export.image.toDrive({
+    image: ndwi_median,
+    description: 'NDWI_Median_' + year + '_Chennai',
+    folder: 'GEE_NDWI_Exports', // <-- CORRECTED FOLDER
+    scale: 30,
+    region: aoi,
+    maxPixels: 1e9
+  });
+});
